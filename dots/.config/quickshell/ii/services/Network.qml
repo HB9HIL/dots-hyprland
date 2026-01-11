@@ -33,7 +33,8 @@ Singleton {
     property string wifiStatus: "disconnected"
 
     property string networkName: ""
-    property int networkStrength
+    property int networkStrength: 0
+    property string activeInterface: ""
     property string materialSymbol: root.ethernet
         ? "lan"
         : root.wifiEnabled
@@ -172,7 +173,7 @@ Singleton {
     Process {
         id: updateConnectionType
         property string buffer
-        command: ["sh", "-c", "nmcli -t -f TYPE,STATE d status && nmcli -t -f CONNECTIVITY g"]
+        command: ["sh", "-c", "nmcli -t -f DEVICE,TYPE,STATE d status && nmcli -t -f CONNECTIVITY g"]
         running: true
         function startCheck() {
             buffer = "";
@@ -189,33 +190,51 @@ Singleton {
             let hasEthernet = false;
             let hasWifi = false;
             let wifiStatus = "disconnected";
+            let primaryInterface = "";
+            let primaryInterfaceType = "";
             lines.forEach(line => {
-                if (line.includes("ethernet") && line.includes("connected"))
-                    hasEthernet = true;
-                else if (line.includes("wifi:")) {
-                    if (line.includes("disconnected")) {
-                        wifiStatus = "disconnected"
-                    }
-                    else if (line.includes("connected")) {
-                        hasWifi = true;
-                        wifiStatus = "connected"
+                const parts = line.split(":");
+                if (parts.length < 3) return;
 
-                        if (connectivity === "limited") {
-                            hasWifi = false;
-                            wifiStatus = "limited"
+                const device = parts[0];
+                const type = parts[1];
+                const state = (parts[2] ?? "").toLowerCase();
+                const isConnected = state.includes("connected");
+
+                if (type === "ethernet") {
+                    hasEthernet = hasEthernet || isConnected;
+                    if (isConnected && primaryInterfaceType !== "ethernet") {
+                        primaryInterface = device;
+                        primaryInterfaceType = "ethernet";
+                    }
+                } else if (type === "wifi") {
+                    if (state.includes("disconnected")) {
+                        wifiStatus = "disconnected";
+                    }
+                    else if (state.includes("connected")) {
+                        hasWifi = true;
+                        wifiStatus = "connected";
+                        if (!primaryInterface || primaryInterfaceType !== "ethernet") {
+                            primaryInterface = device;
+                            primaryInterfaceType = "wifi";
                         }
                     }
-                    else if (line.includes("connecting")) {
-                        wifiStatus = "connecting"
+                    else if (state.includes("connecting")) {
+                        wifiStatus = "connecting";
                     }
-                    else if (line.includes("unavailable")) {
-                        wifiStatus = "disabled"
+                    else if (state.includes("unavailable")) {
+                        wifiStatus = "disabled";
                     }
                 }
             });
+            if (connectivity === "limited" && wifiStatus === "connected") {
+                hasWifi = false;
+                wifiStatus = "limited";
+            }
             root.wifiStatus = wifiStatus;
             root.ethernet = hasEthernet;
             root.wifi = hasWifi;
+            root.activeInterface = primaryInterface;
         }
     }
 
@@ -328,5 +347,81 @@ Singleton {
         id: apComp
 
         WifiAccessPoint {}
+    }
+
+property var networkStats: ({})
+    property var uploadHistory: []
+    property var downloadHistory: []
+    property bool hasInitialMeasurement: false
+    
+    Process {
+        id: networkStatsProcess
+        command: ["cat", "/proc/net/dev"]
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const lines = text.trim().split('\n');
+                const interfaces = {};
+                
+                lines.slice(2).forEach(line => { // Skip header lines
+                    const parts = line.trim().split(/\s+/);
+                    if (parts.length >= 17) {
+                        const ifaceName = parts[0].replace(':', '');
+                        interfaces[ifaceName] = {
+                            rxBytes: parseInt(parts[1]),
+                            txBytes: parseInt(parts[9])
+                        };
+                    }
+                });
+                
+                // Calculate rates and update history
+                updateNetworkRates(interfaces);
+                networkStatsProcess.running = false;
+            }
+        }
+    }
+
+    Timer {
+        id: networkPollTimer
+        interval: 1000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            if (!networkStatsProcess.running) {
+                networkStatsProcess.running = true;
+            }
+        }
+    }
+    
+    function updateNetworkRates(newStats) {
+        const now = Date.now();
+        const preferredInterface = (root.activeInterface && newStats[root.activeInterface])
+            ? root.activeInterface
+            : Object.keys(newStats).find(iface => iface.startsWith("en") || iface.startsWith("wl") || iface.startsWith("eth")) ?? "";
+
+        // Only calculate rates if we have a previous measurement
+        if (hasInitialMeasurement && preferredInterface && networkStats[preferredInterface] && newStats[preferredInterface]) {
+            const timeDiff = Math.max((now - (networkStats.lastUpdate ?? now)) / 1000, 0.001);
+            const rxRate = Math.max(0, (newStats[preferredInterface].rxBytes - networkStats[preferredInterface].rxBytes) / timeDiff);
+            const txRate = Math.max(0, (newStats[preferredInterface].txBytes - networkStats[preferredInterface].txBytes) / timeDiff);
+
+            // Create new arrays to trigger reactivity
+            const newDownloadHistory = [...downloadHistory, rxRate];
+            const newUploadHistory = [...uploadHistory, txRate];
+            
+            if (newDownloadHistory.length > 60) newDownloadHistory.shift();
+            if (newUploadHistory.length > 60) newUploadHistory.shift();
+            
+            downloadHistory = newDownloadHistory;
+            uploadHistory = newUploadHistory;
+        } else if (!hasInitialMeasurement) {
+            hasInitialMeasurement = true;
+        }
+
+        const updated = {};
+        Object.keys(newStats).forEach(k => updated[k] = newStats[k]);
+        updated.lastUpdate = now;
+        networkStats = updated;
     }
 }

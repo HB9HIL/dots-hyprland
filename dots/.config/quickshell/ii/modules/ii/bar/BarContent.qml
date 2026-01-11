@@ -302,6 +302,11 @@ Item { // Bar content region
                             id: notificationUnreadCount
                         }
                     }
+                    NetworkTraffic {
+                        Layout.alignment: Qt.AlignVCenter
+                        Layout.rightMargin: indicatorsRowLayout.realSpacing / 2
+                        color: rightSidebarButton.colText
+                    }
                     MaterialSymbol {
                         text: Network.materialSymbol
                         iconSize: Appearance.font.pixelSize.larger

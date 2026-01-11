@@ -34,6 +34,12 @@ StyledOverlayWidget {
             "history": ResourceUsage.swapUsageHistory,
             "maxAvailableString": ResourceUsage.maxAvailableSwapString
         },
+        {  
+            "icon": "upload_download",  
+            "name": Translation.tr("Network"),  
+            "history": Network.downloadHistory,
+            "maxAvailableString": "∞"
+        }, 
     ]
 
     contentItem: OverlayBackground {

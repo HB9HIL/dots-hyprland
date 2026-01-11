@@ -7,9 +7,15 @@ import QtQuick.Layouts
 StyledPopup {
     id: root
 
-    // Helper function to format KB to GB
+    // Helper functions
     function formatKB(kb) {
         return (kb / (1024 * 1024)).toFixed(1) + " GB";
+    }
+    function formatBps(bytes) {
+        if (bytes < 1024) return bytes.toFixed(0) + " B/s";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB/s";
+        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB/s";
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB/s";
     }
 
     Row {
@@ -87,6 +93,40 @@ StyledPopup {
                     icon: "bolt"
                     label: Translation.tr("Load:")
                     value: `${Math.round(ResourceUsage.cpuUsage * 100)}%`
+                }
+            }
+        }
+
+        Column {
+            visible: Network.activeInterface !== ""
+            anchors.top: parent.top
+            spacing: 8
+
+            StyledPopupHeaderRow {
+                icon: "upload_download"
+                label: Translation.tr("Network")
+            }
+            Column {
+                spacing: 4
+                StyledPopupValueRow {
+                    icon: "settings_ethernet"
+                    label: Translation.tr("Interface:")
+                    value: Network.activeInterface || Translation.tr("n/a")
+                }
+                StyledPopupValueRow {
+                    icon: "south"
+                    label: Translation.tr("Down:")
+                    value: formatBps(Network.downloadRate)
+                }
+                StyledPopupValueRow {
+                    icon: "north"
+                    label: Translation.tr("Up:")
+                    value: formatBps(Network.uploadRate)
+                }
+                StyledPopupValueRow {
+                    icon: "stacked_bar_chart"
+                    label: Translation.tr("Peak (recent):")
+                    value: formatBps(Network.netRecentPeak)
                 }
             }
         }
